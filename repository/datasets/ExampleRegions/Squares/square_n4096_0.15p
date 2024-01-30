@@ -1,0 +1,11 @@
+grid size:4096
+selection size:2515396
+shape:square
+shape_type:square
+max_x_offset:2510
+max_y_offset:2510
+vertices
+-0.5,-0.5
+1585.5,-0.5
+1585.5,1585.5
+-0.5,1585.5

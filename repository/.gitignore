@@ -1,0 +1,8 @@
+build/*
+.vscode/settings.json
+*/.ipynb_checkpoints/*
+polygon_generator/data
+experiments/data_in/*
+experiments/data_out/*
+notebooks/data
+notebooks/Figures
