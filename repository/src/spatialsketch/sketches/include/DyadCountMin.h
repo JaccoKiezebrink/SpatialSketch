@@ -49,6 +49,7 @@ class DyadCountMin : public Sketch {
     void Insert(long id) {
       Insert(id);
     };
+    void Insert(long id, int count, long* hashes) { Insert(id, count); };
     
     int QueryItem(long id) {
       return Query((dyadic1D) id);
@@ -57,6 +58,9 @@ class DyadCountMin : public Sketch {
     int QueryItem(long id, uint* hashes) {
       return Query((dyadic1D) id);
     };
+    int QueryItem(long id, long* hashes) { return QueryItem(id); };
+    int QueryItem(long id, int timestamp) { return QueryItem(id); }
+    int QueryItem(long id, int timestamp, long* hashes) { return QueryItem(id, hashes); }
 
     int GetItemHashes(long id, uint* hashes) {
       return 0;

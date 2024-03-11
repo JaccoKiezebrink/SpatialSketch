@@ -1,13 +1,10 @@
 #include "SpatialSketch.h"
 
-
-
 #include <cmath>
 #include <string>
 #include <iostream>
 #include <unistd.h>
 
-//#include <sketches/Sketches.h>
 
 SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, float epsilon, float delta, int domain_size) {
     n_ = n;
@@ -36,6 +33,12 @@ SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, fl
         hash_coeffs_long_ = sketch_->GetHashesCoeffLong();
         hashes_ = new uint[sketch_->repetitions_];
         //precompute_ = new bloom_precompute();
+    } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+        sketch_ = new ECM(epsilon_, delta_);
+        hash_coeffs_long_ = sketch_->GetHashesCoeffLong();
+        hashes_long_ = new long[sketch_->repetitions_];
+    } else {
+        throw "SpatialSketch::SpatialSketch: sketch name not recognized";
     }
     sketch_size_ = sketch_->GetSize();
     std::cout << "Sketch size " << sketch_size_ / 1024 << "KB" << std::endl;
@@ -51,7 +54,7 @@ SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, fl
             grids_[DimToKey(x_dim, y_dim)] = g;
 
             // Grid without initialized sketches is 2d array of null pointers
-            current_memory += (x_dim * y_dim * sizeof(void*)); // data list
+            current_memory_ += (x_dim * y_dim * sizeof(void*)); // data list
         }
     }
 
@@ -63,7 +66,7 @@ SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, fl
 
     // Rehash for efficiency and add hash map size
     grids_.rehash(grids_.size());
-    current_memory += grids_.size() * (sizeof(void*)) + // data list
+    current_memory_ += grids_.size() * (sizeof(void*)) + // data list
                             grids_.bucket_count() * (sizeof(void*) + sizeof(size_t)); // bucket index;
 }
 
@@ -119,9 +122,9 @@ bool SpatialSketch::DropGrid(int grid_key) {
 
     grid* temp_grid = grids_[grid_key];
     std::pair<int, int> dim = KeyToDimInt(grid_key);
-    current_memory -= (dim.first * dim.second * sizeof(void*));  // pointer memory
-    current_memory -= temp_grid->nr_init_sketches * sketch_size_;  // sketch memory
-    current_memory -= (sizeof(void*));  // ptr to grid, note that buckets stays until rehash
+    current_memory_ -= (dim.first * dim.second * sizeof(void*));  // pointer memory
+    current_memory_ -= temp_grid->nr_init_sketches * sketch_size_;  // sketch memory
+    current_memory_ -= (sizeof(void*));  // ptr to grid, note that buckets stays until rehash
     grids_.erase(grid_key);
 
     if (grid_key == DimToKey(n_/resolution_, n_/resolution_)) {
@@ -250,6 +253,8 @@ void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, in
                 grid_ptr->second->cells[x_cell][y_cell] = new FM(epsilon_, delta_, hash_coeffs_long_);
             } else if (sketch_name_ == "BF") {
                 grid_ptr->second->cells[x_cell][y_cell] = new BloomFilter(delta_, domain_size_, hash_coeffs_long_);//, hash_coeffs_long_);  
+            } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+                grid_ptr->second->cells[x_cell][y_cell] = new ECM(epsilon_, delta_, hash_coeffs_long_);
             }
 
             if (nr_hashes_ > 0 ) {
@@ -257,6 +262,8 @@ void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, in
                     grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
                 } else if (sketch_name_ == "FM") {
                     grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
+                } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
                 }
             } else {
                 grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
@@ -266,7 +273,7 @@ void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, in
 
             // Increment counters
             grid_ptr->second->nr_init_sketches += 1;
-            current_memory += sketch_size_;
+            current_memory_ += sketch_size_;
 
             // Initializing of new sketch implies an increase in memory usage
             if (memory_limit_ > 0) {
@@ -279,6 +286,10 @@ void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, in
                     grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
                 } else if (sketch_name_ == "FM") {
                     grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
+                } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+                    current_memory_ -= grid_ptr->second->cells[x_cell][y_cell]->GetSize();
+                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
+                    current_memory_ += grid_ptr->second->cells[x_cell][y_cell]->GetSize();
                 }
             } else {
                 grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
@@ -306,7 +317,7 @@ inline void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long i
 
             // Increment counters
             grid_ptr->second->nr_init_sketches += 1;
-            current_memory += sketch_size_;
+            current_memory_ += sketch_size_;
 
             // Initializing of new sketch implies an increase in memory usage
             if (memory_limit_ > 0) {
@@ -413,6 +424,8 @@ void SpatialSketch::Update(int x, int y, long item, int value) {
         nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
     } else if (sketch_name_ == "BF") {
         nr_hashes_ = 0; //sketch_->repetitions_;//GetItemHashes(item, hashes_);
+    } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+        nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
     }
 
     std::vector<std::pair<int, int>> x_intervals, y_intervals;
@@ -442,7 +455,7 @@ void SpatialSketch::Update(int x, int y, long item, int value) {
                 continue;
             }
             // Update the individual intervals
-            if (sketch_name_ == "CM" || sketch_name_ == "CML2" || sketch_name_ == "FM") {
+            if (sketch_name_ == "CM" || sketch_name_ == "CML2" || sketch_name_ == "FM" || (sketch_name_.find(std::string("ECM")) != std::string::npos)) {
                 UpdateInterval(x_intervals[i].first - 1, y_intervals[j].first - 1, x_intervals[i].second - 1, y_intervals[j].second - 1, item, value, hashes_, hashes_long_);
             } else if (sketch_name_ == "dyadicCM") {
                 UpdateInterval(x_intervals[i].first - 1, y_intervals[j].first - 1, x_intervals[i].second - 1, y_intervals[j].second - 1, item, value, precompute_);
@@ -621,7 +634,7 @@ std::vector<dyadic2D> SpatialSketch::GetDyadicIntervals(int x1, int y1, int x2, 
 }
 
 
-bool SpatialSketch::QueryDyadicInterval(dyadic2D di, long item, long item_end, int &query_sum) {
+bool SpatialSketch::QueryDyadicInterval(dyadic2D di, long item, long item_end, int &query_sum, int timestamp) {
     /*std::string*/ int key = DimToKey(n_ / (di.x2 - di.x1 + 1), n_ / (di.y2 - di.y1 + 1));
     auto grid_ptr = grids_.find(key);
     if (grid_ptr != grids_.end()) {
@@ -638,6 +651,12 @@ bool SpatialSketch::QueryDyadicInterval(dyadic2D di, long item, long item_end, i
                 }
             } else if (sketch_name_ == "dyadicCM") {
                 query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->Query(dyadic1D(item, item_end))); 
+            } else if (sketch_name_ == "ECM") {
+                if (nr_hashes_ > 0) {
+                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp, hashes_long_));
+                } else {
+                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp));
+                }
             }
         } 
         return true;  // Grid exists, thus query was success
@@ -646,7 +665,7 @@ bool SpatialSketch::QueryDyadicInterval(dyadic2D di, long item, long item_end, i
 }
 
 
-int SpatialSketch::RecurseQueryDyadicInterval(dyadic2D d_interval, long item, long item_end, int &query_sum) {
+int SpatialSketch::RecurseQueryDyadicInterval(dyadic2D d_interval, long item, long item_end, int &query_sum, int timestamp) {
     dyadic2D di1, di2; // copy
     di1 = di2 = d_interval;
     int x_dim = d_interval.x2 - d_interval.x1 + 1;
@@ -666,12 +685,12 @@ int SpatialSketch::RecurseQueryDyadicInterval(dyadic2D d_interval, long item, lo
 
     int subqueries = 0;
     if (!QueryDyadicInterval(di1, item, item_end, query_sum)) {
-        subqueries += RecurseQueryDyadicInterval(di1, item, item_end, query_sum);
+        subqueries += RecurseQueryDyadicInterval(di1, item, item_end, query_sum, timestamp);
     } else {
         subqueries++;
     }
     if (!QueryDyadicInterval(di2, item, item_end, query_sum)) {
-        subqueries += RecurseQueryDyadicInterval(di2, item, item_end, query_sum);
+        subqueries += RecurseQueryDyadicInterval(di2, item, item_end, query_sum, timestamp);
     } else {
         subqueries++;
     }
@@ -681,31 +700,35 @@ int SpatialSketch::RecurseQueryDyadicInterval(dyadic2D d_interval, long item, lo
 
 // Given a set of ranges query the dyadic intervals and return the result
 // Note, function kinda sketch specific has to be adapted for different sketches
-int SpatialSketch::QueryRanges(std::vector<range> ranges, long item, long item_end, std::shared_ptr<statistics> stats) {
+int SpatialSketch::QueryRanges(std::vector<range> ranges, long item, long item_end, int timestamp) {
     if (sketch_name_ == "FM") {
-        return QueryCountDistinct(ranges, stats);
+        return QueryCountDistinct(ranges);
     } else if (sketch_name_ == "BF") {
         if (item < 0) {
             throw "SpatialSketch::QueryRanges: item is negative";
         }
-        int mem =  QueryMembership(ranges,item, stats);// item, stats);
+        int mem =  QueryMembership(ranges,item);
         if (mem > 0) {
             return 1;
         } else {
             return 0;
         }
     } else {
-        return QueryFrequency(ranges, item, item_end, stats);
+        return QueryFrequency(ranges, item, item_end, timestamp);
     }
 }
 
-int SpatialSketch::QueryFrequency(std::vector<range> ranges, long item, long item_end, std::shared_ptr<statistics> stats) {
+int SpatialSketch::QueryFrequency(std::vector<range> ranges, long item, long item_end, int timestamp) {
     int sum = 0, subqueries = 0;
     std::pair<int, int> index;
     std::vector<dyadic2D> dyadic_intervals;
     dyadic_intervals.reserve(levels_*levels_);
 
-    nr_hashes_ = sketch_->GetItemHashes(item, hashes_);
+    if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+        nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
+    } else {
+        nr_hashes_ = sketch_->GetItemHashes(item, hashes_);
+    }
 
     // Query the sketch of every dyadic interval and accumulate the sum
     int count = 0;
@@ -717,11 +740,11 @@ int SpatialSketch::QueryFrequency(std::vector<range> ranges, long item, long ite
             di.y1--;
             di.y2--;
             // Query 1 cell dyadic intervals on the grid, larger intervals via the hash map
-            bool query_success = QueryDyadicInterval(di, item, item_end, sum);
+            bool query_success = QueryDyadicInterval(di, item, item_end, sum, timestamp);
 
             // If query was not success due to the grid not existing, the current interval has to be broken up again
             if (!query_success) {
-                subqueries += RecurseQueryDyadicInterval(di, item, item_end, sum); 
+                subqueries += RecurseQueryDyadicInterval(di, item, item_end, sum, timestamp); 
             } else {
                 subqueries++;
             }
@@ -730,11 +753,6 @@ int SpatialSketch::QueryFrequency(std::vector<range> ranges, long item, long ite
     }
 
     nr_hashes_ = 0;  // reset for next query/update
-
-    // Update statistics if pointer is provided
-    if (stats != nullptr) {
-        stats->nr_of_subqueries = subqueries;
-    }
 
     return sum;
 }
@@ -788,7 +806,7 @@ int SpatialSketch::RecurseQueryDyadicIntervalCountDistinct(dyadic2D d_interval, 
     return subqueries;
 }
 
-int SpatialSketch::QueryCountDistinct(std::vector<range> ranges, std::shared_ptr<statistics> stats) {
+int SpatialSketch::QueryCountDistinct(std::vector<range> ranges) {
     FM merged_fm = FM(epsilon_, delta_, hash_coeffs_long_);
     nr_hashes_ = 0; //merged_fm->GetItemHashes(item, hashes_long_);
 
@@ -832,10 +850,6 @@ int SpatialSketch::QueryCountDistinct(std::vector<range> ranges, std::shared_ptr
     
     nr_hashes_ = 0;  // reset for next query/update
 
-    // Update statistics if pointer is provided
-    if (stats != nullptr) {
-        stats->nr_of_subqueries = subqueries;
-    }
     est_distinct_ips= merged_fm.QueryItem(0);
     //std::cout << "Estimate distinct ips: " << est_distinct_ips << std::endl;
     return est_distinct_ips;
@@ -895,7 +909,7 @@ int SpatialSketch::RecurseQueryDyadicIntervalMembership(dyadic2D d_interval, lon
     return subqueries;
 }
 
-int SpatialSketch::QueryMembership(std::vector<range> ranges, long item, std::shared_ptr<statistics> stats) {
+int SpatialSketch::QueryMembership(std::vector<range> ranges, long item) {
     int sum = 0, subqueries = 0;
     std::pair<int, int> index;
     std::vector<dyadic2D> dyadic_intervals;
@@ -932,11 +946,6 @@ int SpatialSketch::QueryMembership(std::vector<range> ranges, long item, std::sh
     }
 
     nr_hashes_ = 0;  // reset for next query/update
-
-    // Update statistics if pointer is provided
-    if (stats != nullptr) {
-        stats->nr_of_subqueries = subqueries;
-    }
 
     return sum;
 }

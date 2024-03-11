@@ -35,7 +35,7 @@ std::string folder = "/home/jacco/Desktop/grid/";
 std::string region_data_dir = "../experiments/data_in/Regions/Squares/N4096";
 std::string ip_data =  "/home/jacco/Desktop/grid/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
 int postgres_index = 0;  // 0: no index, 1: btree [x,y], 2: btree [ip,x,y], 3: gist [x,y] box, 4: gist [x,y] polygon, 5: spgist [x,y] box, 6: spgist [x,y] polygon
-std::string sketch_name = "CM";  // CM, dyadicCM, BF, FM, CML2
+std::string sketch_name = "CM";  // CM, dyadicCM, BF, FM, CML2, ECM
 long memory_limit = 34797310;
 int max_insertions = -1;
 bool range_queries = false;
@@ -220,18 +220,20 @@ int main(int argc, char* argv[]) {
             std::getline(*data_file,line); // header
 
             std::cout << "Opened data file: " << ip_data << std::endl;
+            long timestamp = 0;
             while (std::getline(*data_file, line)) {
                 if (max_insertions > -1 && insertion_count >= max_insertions) {
                     std::cout << "Max insertions of " << max_insertions << " reached" << std::endl;
                     break;
                 }
+                timestamp++;
                 std::stringstream linestream(line);
                 input_data tup;
                 for (int i = 0; i < 6; i++) {
                     std::getline(linestream, cell, ',');
                     // TODO: This depends on the order of the columns in the dataset, therefore not ideal
                     // Current GeoCaide orders it as follows [timestamp, int_ip, long, lat, points]
-                    if (i == 0) tup.timestamp = std::stol(cell); // timestamp
+                    if (i == 0) tup.timestamp = timestamp; //std::stol(cell); // timestamp
                     if (i == 1) tup.ip = std::stol(cell);  // int_ip (can be 2^32, thus uint/long)
                                                                            // We cast it to int as current fucntion support this, that does imply negative items can occur, but this should not change any result.
                     if (i == 2) tup.x = std::stoi(cell);  // long

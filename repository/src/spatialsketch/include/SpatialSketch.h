@@ -10,6 +10,7 @@
 #include "DyadCountMin.h"
 #include "FM.h"
 #include "BloomFilter.h"
+#include "ECM.h"
 
 #include <vector>
 #include <list>
@@ -66,13 +67,13 @@ class SpatialSketch {
          * @param stats If statistics pointer is supplied this function will log any relevant statistics to the struct
          * @return Query answer, i.e., the aggregate of all ranges
         */
-        int QueryRanges(std::vector<range> ranges, long item=0, long item_end=0, std::shared_ptr<statistics> stats = nullptr);
+        int QueryRanges(std::vector<range> ranges, long item=0, long item_end=0, int timestamp=0);
 
         long QueryRangesL2(std::vector<range> ranges);
 
         // Obtain the memory usage of SpatialSketch in bytes
         inline uint GetSize() {
-            return current_memory;
+            return current_memory_;
         }
 
         int GetResolution() {
@@ -116,7 +117,7 @@ class SpatialSketch {
         // Memory
         long memory_limit_ = 0;
         int sketch_size_ = 0;  // Size of one embedded sketch
-        unsigned long current_memory = 0; // running count of current memory of spatialsketch
+        unsigned long current_memory_ = 0; // running count of current memory of spatialsketch
 
         //
         int prev_x_ = -1;
@@ -190,22 +191,22 @@ class SpatialSketch {
         // obtain the dyadic intervals that together compose the target part that overlaps with the base
         std::vector<dyadic1D> ObtainIntervals(dyadic1D target, dyadic1D base);
 
-        int RecurseQueryDyadicInterval(dyadic2D d_interval, long item, long item_end, int &query_sum);
+        int RecurseQueryDyadicInterval(dyadic2D d_interval, long item, long item_end, int &query_sum, int timestamp=0);
 
         // Query individual dyadic interval and accumulate result
-        bool QueryDyadicInterval(dyadic2D di, long item, long item_end, int &query_sum);
+        bool QueryDyadicInterval(dyadic2D di, long item, long item_end, int &query_sum, int timestamp=0);
 
-        int QueryFrequency(std::vector<range> ranges, long item=0, long item_end=0, std::shared_ptr<statistics> stats = nullptr);
+        int QueryFrequency(std::vector<range> ranges, long item=0, long item_end=0, int timestamp=0);
         
         int RecurseQueryDyadicIntervalCountDistinct(dyadic2D d_interval, FM &fm);
         bool QueryDyadicIntervalCountDistinct(dyadic2D di, FM &fm);
 
-        int QueryCountDistinct(std::vector<range> ranges, std::shared_ptr<statistics> stats);
+        int QueryCountDistinct(std::vector<range> ranges);
 
         int RecurseQueryDyadicIntervalMembership(dyadic2D d_interval, long item, int &query_sum);
         bool QueryDyadicIntervalMembership(dyadic2D di, long item, int &query_sum);
 
-        int QueryMembership(std::vector<range> ranges, long item, std::shared_ptr<statistics> stats);
+        int QueryMembership(std::vector<range> ranges, long item);
         bool QueryDyadicInterval(dyadic2D di, CountMin &cm);
         int RecurseQueryDyadicInterval(dyadic2D d_interval, CountMin &cm);
 };

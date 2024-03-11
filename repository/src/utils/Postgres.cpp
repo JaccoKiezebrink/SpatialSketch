@@ -48,14 +48,16 @@ Postgres::Postgres(std::string data_path, int index) {
             pqxx::stream_to S(w, "iplocations");
             std::string line, cell;
             std::getline(*data_file,line); // header
+            long timestamp = 0;
             while (std::getline(*data_file, line)) {
+                timestamp++;
                 std::stringstream linestream(line);
                 std::tuple<long, long, int, int> tup;
                 for (int i = 0; i < 4; i++) {
                     std::getline(linestream, cell, ',');
                     // TODO: This depends on the order of the columns in the dataset, therefore not ideal
                     // Current GeoCaide orders it as follows [timestamp, int_ip, long, lat, points]
-                    if (i == 0) std::get<0>(tup) = (long) std::stol(cell); // timestamp
+                    if (i == 0) std::get<0>(tup) = timestamp; //(long) std::stol(cell); // timestamp
                     if (i == 1) std::get<1>(tup) = (long) std::stol(cell);  // int_ip (can be 2^32, thus uint/long)
                                                                             // We cast it to int as current fucntion support this, that does imply negative items can occur, but this should not change any result.
                     if (i == 2) std::get<2>(tup) = std::stoi(cell);  // long

@@ -27,9 +27,13 @@ class BloomFilter : public Sketch {
       void Insert(long id, uint* hashes);
       void Insert(long id, int count);
       void Insert(long id, int count, uint* hashes);
+      void Insert(long id, int count, long* hashes) { Insert(id); };
 
       int QueryItem(long id); // 1: true, 0: false. Not a boolean to adhere to abstract class.
       int QueryItem(long id, uint* hashes);
+      int QueryItem(long id, long* hashes) { return QueryItem(id); };
+      int QueryItem(long id, int timestamp) { return QueryItem(id); }
+      int QueryItem(long id, int timestamp, long* hashes) { return QueryItem(id, hashes); }
 
       int** GetHashesCoeff() {
           throw "BF does not support GetHashesCoeff, only Longs";

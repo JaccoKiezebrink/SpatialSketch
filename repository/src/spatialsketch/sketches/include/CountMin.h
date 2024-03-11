@@ -45,12 +45,17 @@ class CountMin : public Sketch {
     void Insert(long id, uint* hashes);
     void Insert(long id, int count);
     void Insert(long id, int count, uint* hashes);
+    void Insert(long id, int count, long* hashes) { Insert(id, count); };
 
     std::vector<int> QueryCounters(long id);
     std::vector<int> QueryCounters(long id, uint* hashes);
 
     int QueryItem(long id);
     int QueryItem(long id, uint* hashes);
+    int QueryItem(long id, long* hashes) { return QueryItem(id); };
+    int QueryItem(long id, int timestamp) { return QueryItem(id); }
+    int QueryItem(long id, int timestamp, long* hashes) { return QueryItem(id, hashes); }
+
     void Merge(Sketch *cm);
     long L2Estimate();
 

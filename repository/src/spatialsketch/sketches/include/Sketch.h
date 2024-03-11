@@ -19,9 +19,13 @@ class Sketch {
         virtual void Insert(long id, long* hashes) = 0;
         virtual void Insert(long id, int count) = 0;
         virtual void Insert(long id, int count, uint* hashes) = 0;
+        virtual void Insert(long id, int count, long* hashes) = 0;
         virtual void Insert(long id, int val, dyadic_cm_precompute* precompute) = 0;
         virtual int QueryItem(long id) = 0;
         virtual int QueryItem(long id, uint* hashes) = 0;
+        virtual int QueryItem(long id, long* hashes) = 0;
+        virtual int QueryItem(long id, int timestamp) = 0;
+        virtual int QueryItem(long id, int timestamp, long* hashes) = 0;
         virtual int Query(dyadic1D dyad) = 0;
         virtual int GetItemHashes(long id, uint* hashes) = 0;  // TODO: you actually want CM to implement this, but non hash sketches to simply return zero
         virtual int GetItemHashes(long id, long* hashes) = 0;
