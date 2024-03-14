@@ -122,8 +122,21 @@ bool SpatialSketch::DropGrid(int grid_key) {
 
     grid* temp_grid = grids_[grid_key];
     std::pair<int, int> dim = KeyToDimInt(grid_key);
+
+    // For ECM we have to iterate over the cells to check what memory they use and has to be subtracted
+    if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+        for (int i = 0; i < dim.first; i++) {
+            for (int j = 0; j < dim.second; j++) {
+                if (temp_grid->cells[i][j] != NULL) {
+                    current_memory_ -= temp_grid->cells[i][j]->GetSize();
+                }
+            }
+        }
+    } else {
+        // For fixed size sketches we can simply subtract the memory of the grid
+        current_memory_ -= temp_grid->nr_init_sketches * sketch_size_;  // sketch memory
+    }
     current_memory_ -= (dim.first * dim.second * sizeof(void*));  // pointer memory
-    current_memory_ -= temp_grid->nr_init_sketches * sketch_size_;  // sketch memory
     current_memory_ -= (sizeof(void*));  // ptr to grid, note that buckets stays until rehash
     grids_.erase(grid_key);
 

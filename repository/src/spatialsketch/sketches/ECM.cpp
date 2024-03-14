@@ -31,8 +31,8 @@ bool ECM::isPrime(long prime) {
 
 
 ECM::ECM(float epsilon, float delta, long** hashab) : Sketch() {
-    width_ = 1; //(int) ceil(std::exp(1) / epsilon);  // TODO: Check if math is correct
-    repetitions_ = 1; //(int) ceil(log(1 / delta));
+    width_ = (int) ceil(std::exp(1) / (std::sqrt(epsilon + 1.0f) - 1.0f));
+    repetitions_ = (int) ceil(log(1 / delta));
     cm_ = new ExpHist*[repetitions_];
     size_ = sizeof(int) * width_ * repetitions_; // initially all counters of the cm only consist the number of buckets
 
@@ -131,14 +131,14 @@ void ECM::InsertBucket(int i, int j, int t)	{
         size_ += sizeof(Bucket);
 	} else {
 		while (p < z) {
-			if ((cm_[i][j].bucket[p + 2].exponent == value) && (p == -1)) {   // p+2 = 1
+			if ((cm_[i][j].bucket[p + 2].exponent == value) && (p == -1)) {   // If neighboring bucket size can be increased, case 1
 				cm_[i][j].bucket[p + 2].exponent++;
 				cm_[i][j].bucket[p + 2].end = cm_[i][j].bucket[p + 1].end;
 				cm_[i][j].bucket[p + 1].start = cm_[i][j].bucket[p + 2].end;
 				cm_[i][j].bucket[p + 1].end = t;
 				p = p + 2;
 				value = cm_[i][j].bucket[p].exponent;
-			} else if ((cm_[i][j].bucket[p + 2].exponent == value) && (p != -1)) {
+			} else if ((cm_[i][j].bucket[p + 2].exponent == value) && (p != -1)) {  // If neighboring bucket size can be increased, case 2
 				cm_[i][j].bucket[p + 2].exponent++;
 				cm_[i][j].bucket[p + 2].end = cm_[i][j].bucket[p + 1].end;
 				cm_[i][j].bucket[p + 1].start = cm_[i][j].bucket[p + 2].end;
@@ -152,9 +152,9 @@ void ECM::InsertBucket(int i, int j, int t)	{
                 size_ -= sizeof(Bucket);
 				p = p + 2;
 				value = cm_[i][j].bucket[p].exponent;
-			} else if ((cm_[i][j].bucket[p + 2].exponent != value) && (p != -1)) {
+			} else if ((cm_[i][j].bucket[p + 2].exponent != value) && (p != -1)) {  // no more merging to be done
 				break;
-			} else {
+			} else {  // shift all buckets to create a new bucket
 				for (int q = z; q > 0; q--) {
 					cm_[i][j].bucket[q].exponent = cm_[i][j].bucket[q - 1].exponent;
 					cm_[i][j].bucket[q].start = cm_[i][j].bucket[q - 1].start;

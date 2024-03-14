@@ -22,9 +22,10 @@ typedef struct QuerySet {
     int N = -1;
     int offset_x = 0;
     int offset_y = 0;
+    int time_window = 0;  // time window consting of [time_window, max_window], i.e., 0 is the entire time frame
 
     QuerySet() {};
-    QuerySet(std::vector<range> ranges, std::vector<std::pair<float, float>> vertices, long item, long item_end, long groundtruth, int L1, int N, int offset_x, int offset_y) : ranges(ranges), vertices(vertices), item(item), item_end(item_end), groundtruth(groundtruth), L1(L1), N(N), offset_x(offset_x), offset_y(offset_y) {};
+    QuerySet(std::vector<range> ranges, std::vector<std::pair<float, float>> vertices, long item, long item_end, long groundtruth, int L1, int N, int offset_x, int offset_y, int time_window) : ranges(ranges), vertices(vertices), item(item), item_end(item_end), groundtruth(groundtruth), L1(L1), N(N), offset_x(offset_x), offset_y(offset_y), time_window(time_window) {};
 } QuerySet;
 
 
@@ -58,7 +59,7 @@ class Postgres {
         std::vector<long> QuerySetRangeCountIP(std::vector<QuerySet> queries, int index, float &time, int sample_size = 1);
 
         std::vector<long> GetItemsInRange(std::vector<range> ranges, int min_query_answer = 0);
-        std::vector<QuerySet> GetIPRangeQueriesFrequency(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int resolution, int max_x_offset, int max_y_offset, int sample_size, bool range_queries, int min_query_answer=0);
+        std::vector<QuerySet> GetIPRangeQueriesFrequency(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int resolution, int max_x_offset, int max_y_offset, int sample_size, bool range_queries, int min_query_answer=0, bool timestamp=false);
         std::vector<QuerySet> GetIPRangeQueriesCountDistinct(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int max_x_offset, int max_y_offset, int sample_size, int limit=-1, int min_query_answer=0);
         std::vector<QuerySet> GetIPRangeQueriesMembership(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int max_x_offset, int max_y_offset, int sample_size, int limit=-1, int min_query_answer=0);
         std::vector<QuerySet> GetIPRangeQueriesL2(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int max_x_offset, int max_y_offset, int sample_size, int min_query_answer=0);
