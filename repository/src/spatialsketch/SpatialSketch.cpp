@@ -726,6 +726,8 @@ int SpatialSketch::QueryRanges(std::vector<range> ranges, long item, long item_e
         } else {
             return 0;
         }
+    } else if (sketch_name_ == "ECM_merge") {
+        return QueryECMMerge(ranges, item, item_end, timestamp);
     } else {
         return QueryFrequency(ranges, item, item_end, timestamp);
     }
@@ -1045,4 +1047,105 @@ long SpatialSketch::QueryRangesL2(std::vector<range> ranges) {
     }
 
     return merged_cm.L2Estimate();
+}
+
+ int SpatialSketch::QueryECMMerge(std::vector<range> ranges, long item, long item_end, int timestamp) {
+    std::pair<int, int> index;
+    std::vector<dyadic2D> dyadic_intervals;
+    dyadic_intervals.reserve(levels_*levels_);
+
+    // Keep vector of hists per repitition
+    std::vector<ExpHist> hists[sketch_->repetitions_];
+    for (int i = 0; i < sketch_->repetitions_; i++) {
+        hists[i] = {};
+    }
+
+    nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
+
+    // Query the sketch of every dyadic interval and accumulate the sum
+    int count = 0;
+    for (range r : ranges) {
+        dyadic_intervals = GetDyadicIntervals(r.x1, r.y1, r.x2, r.y2);
+        for (dyadic2D di : dyadic_intervals) {
+            di.x1--;
+            di.x2--;
+            di.y1--;
+            di.y2--;
+
+            bool query_success = QueryDyadicIntervalECM(di, hists, item, item_end);
+            // If query was not success due to the grid not existing, the current interval has to be broken up again
+            if (!query_success) {
+                RecurseQueryDyadicIntervalECM(di, hists, item, item_end); 
+            }
+        }
+        count++;
+    }
+
+    // Compute sum
+    int sum = INT_MAX;
+    int k_ = std::ceil(1.0f/epsilon_);
+    for (int i = 0; i < sketch_->repetitions_; i++) {
+        ExpHist merged = MergeECM(hists[i], k_);
+        int temp_sum = HistSum(merged, timestamp);
+        if (temp_sum < sum) {
+            sum = temp_sum;
+        }
+    }
+
+    nr_hashes_ = 0;  // reset for next query/update
+
+    return sum;
+ }
+
+
+
+bool SpatialSketch::QueryDyadicIntervalECM(dyadic2D di, std::vector<ExpHist> *hists, long item, long item_end) {
+    int key = DimToKey(n_ / (di.x2 - di.x1 + 1), n_ / (di.y2 - di.y1 + 1));
+    auto grid_ptr = grids_.find(key);
+    if (grid_ptr != grids_.end()) {
+        
+        int x_cell = di.x1/(di.x2-di.x1+1);
+        int y_cell = di.y1/(di.y2-di.y1+1);
+        // Check if the actual sketch is initialized, if it isn't then the value is simply zero
+        if (grid_ptr->second->cells[x_cell][y_cell] != NULL) {
+            std::vector<ExpHist> rep_hists = dynamic_cast<ECM*>(grid_ptr->second->cells[x_cell][y_cell])->GetHists(item, hashes_long_);
+            for (int i = 0; i < (int) rep_hists.size(); i++) {
+                hists[i].push_back(rep_hists[i]);
+            }            
+        } 
+        return true;  // Grid exists, thus query was success
+    }
+    return false;  // Grid doesn't exist
+}
+
+int SpatialSketch::RecurseQueryDyadicIntervalECM(dyadic2D d_interval, std::vector<ExpHist> *hists, long item, long item_end) {
+    dyadic2D di1, di2; // copy
+    di1 = di2 = d_interval;
+    int x_dim = d_interval.x2 - d_interval.x1 + 1;
+    int y_dim = d_interval.y2 - d_interval.y1 + 1;
+
+    // Nothing to break, return
+    if (x_dim == resolution_ && y_dim == resolution_) {
+        return 0;
+    // Otherwise break largest dimension
+    } else if (x_dim >= y_dim) {
+        di1.x2 = di1.x1 + (x_dim / 2) - 1;
+        di2.x1 = di2.x1 + (x_dim / 2);
+    } else {
+        di1.y2 = di1.y1 + (y_dim / 2) - 1; //(di1.y1 + di1.y2 + 1) / 2 - 1;
+        di2.y1 = di2.y1 + (y_dim / 2); // (di1.y1 + di1.y2 + 1) / 2;//
+    }
+
+    int subqueries = 0;
+    if (!QueryDyadicIntervalECM(di1, hists, item, item_end)) {
+        subqueries += RecurseQueryDyadicIntervalECM(di1, hists, item, item_end);
+    } else {
+        subqueries++;
+    }
+    if (!QueryDyadicIntervalECM(di2, hists, item, item_end)) {
+        subqueries += RecurseQueryDyadicIntervalECM(di2, hists, item, item_end);
+    } else {
+        subqueries++;
+    }
+    return subqueries;
 }

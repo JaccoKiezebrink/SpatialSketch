@@ -5,11 +5,13 @@
 
 #include <cstring>
 #include <iostream>
+#include <list>
+#include <vector>
 
 #define WINDOW_SIZE     300000
 
 
-typedef struct Bucket {
+/*typedef struct Bucket {
 	int exponent;
 	int end;
 	int start;
@@ -20,8 +22,23 @@ typedef struct ExpHist {
 	Bucket bucket[100];
 	int number;
     ExpHist() { memset(bucket, -1, sizeof(Bucket)*100); number = -1; };
+} ExpHist;*/
+
+
+typedef struct Bucket {
+  int end;
+  int start;
+  Bucket(int end, int start): end(end), start(start) {};  
+} Bucket;
+
+typedef struct ExpHist {
+  std::vector<std::list<Bucket>> buckets;
+  ExpHist() {};
 } ExpHist;
 
+
+ExpHist MergeECM(std::vector<ExpHist> hists, int k_);
+int HistSum(const ExpHist &hist, int t);
 
 class ECM : public Sketch{
   public:
@@ -64,20 +81,19 @@ class ECM : public Sketch{
     int** GetHashesCoeff() { throw std::runtime_error("ECM does not support GetHashesCoeff, only Longs"); }
     void PrecomputeInsert(long point, dyadic_cm_precompute *precompute) {};
 
-  protected:
-    std::vector<ExpHist> GetHists(long id, int timestamp);
-    std::vector<ExpHist> GetHists(long id, int timestamp, long* hashes);
-
+//  protected:
+    std::vector<ExpHist> GetHists(long id);
+    std::vector<ExpHist> GetHists(long id, long* hashes);
+    int GetK() { return k_; }
 
 
   private:
     long **hashab_;
     ExpHist **cm_;
     long size_ = 0;
+    int k_;
 
-    void ExpireBucket(int i, int j, int t);
     void InsertBucket(int i, int j, int t);
-    int HistSum(const ExpHist &hist, int t);
 };
 
 #endif  // ECM_SKETCH_H_

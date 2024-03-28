@@ -208,7 +208,11 @@ class SpatialSketch {
 
         int QueryMembership(std::vector<range> ranges, long item);
         bool QueryDyadicInterval(dyadic2D di, CountMin &cm);
-        int RecurseQueryDyadicInterval(dyadic2D d_interval, CountMin &cm);
+        int RecurseQueryDyadicInterval(dyadic2D d_interval, CountMin &cm);        
+
+        int QueryECMMerge(std::vector<range> ranges, long item=0, long item_end=0, int timestamp=0);
+        bool QueryDyadicIntervalECM(dyadic2D di, std::vector<ExpHist> *hists, long item, long item_end);
+        int RecurseQueryDyadicIntervalECM(dyadic2D d_interval, std::vector<ExpHist> *hists, long item, long item_end);
 };
 
 #endif   // SPATIAL_SKETCH_H_

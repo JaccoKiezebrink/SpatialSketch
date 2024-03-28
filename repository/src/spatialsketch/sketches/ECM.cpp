@@ -26,7 +26,6 @@ bool ECM::isPrime(long prime) {
         return false;
     }
     return true;
-
 }
 
 
@@ -35,6 +34,7 @@ ECM::ECM(float epsilon, float delta, long** hashab) : Sketch() {
     repetitions_ = (int) ceil(log(1 / delta));
     cm_ = new ExpHist*[repetitions_];
     size_ = sizeof(int) * width_ * repetitions_; // initially all counters of the cm only consist the number of buckets
+    k_ = std::ceil(1.0f/epsilon);
 
     if (hashab != nullptr) {
         hashab_ = hashab;
@@ -99,25 +99,42 @@ void ECM::Insert(long id, int count, long* hashes) {
 }
 
 
-void ECM::ExpireBucket(int i, int j, int t) {
-    int z = cm_[i][j].number - 1;
-    if (z != -2) {
-        for (int q = z; q >= 0; q--) {
-            if (cm_[i][j].bucket[q].end <= (t - WINDOW_SIZE)) {
-                cm_[i][j].bucket[q].exponent = -1;
-                cm_[i][j].bucket[q].start = -1;
-                cm_[i][j].bucket[q].end = -1;
-                cm_[i][j].number--;
-            } else {
-                break;
-            }
-        }
-    }
-}
-
 
 void ECM::InsertBucket(int i, int j, int t)	{
-	int z = cm_[i][j].number;
+    // Add new item as singleton bucket
+    Bucket new_bucket = Bucket(t, t);
+    ExpHist *hist = &cm_[i][j];
+    // If ExpHist is empty, intialize first exponent list
+    if (hist->buckets.size() == 0) {
+        std::list<Bucket> temp = std::list<Bucket>();
+        temp.push_front(new_bucket);
+        hist->buckets.push_back(temp);
+    } else {
+        // else simply add it to the front of the 1 exponent bucket
+        hist->buckets[0].push_front(new_bucket);
+    }
+    //hist->nr_buckets++;
+
+    // for every exponent list
+    for (size_t k = 0; k < hist->buckets.size(); k++) {
+        // if number of buckets exceeds k, merge the last two buckets
+        if ((int) hist->buckets[k].size() > k_) {
+            Bucket b1 = hist->buckets[k].back(); hist->buckets[k].pop_back();
+            Bucket b2 = hist->buckets[k].back(); hist->buckets[k].pop_back();
+
+            // If this is the last exponent list
+            if ((k+1) == hist->buckets.size()) {
+                hist->buckets.push_back(std::list<Bucket>());
+            }
+            // Create new bucket with exponent k+1
+            hist->buckets[k+1].push_back(Bucket(b2.start, b1.end));
+            //hist->nr_buckets--; // decrease number of buckets due to merge
+        }
+    }
+
+
+
+	/*int z = cm_[i][j].number;
 	int p = -1;
 	int value = 0;
 	int first = 0;
@@ -130,6 +147,9 @@ void ECM::InsertBucket(int i, int j, int t)	{
 		cm_[i][j].number = 1;
         size_ += sizeof(Bucket);
 	} else {
+    long **hashab_;
+    ExpHist **cm_;
+    long size_ = 0;
 		while (p < z) {
 			if ((cm_[i][j].bucket[p + 2].exponent == value) && (p == -1)) {   // If neighboring bucket size can be increased, case 1
 				cm_[i][j].bucket[p + 2].exponent++;
@@ -181,12 +201,12 @@ void ECM::InsertBucket(int i, int j, int t)	{
 				cm_[i][j].bucket[q].end = -1;
 			}
 		}
-	}
+	}*/
 }
 
 
 // Query the respective d counters for the given item id, hashes not given
-std::vector<ExpHist> ECM::GetHists(long id, int timestamp) {
+std::vector<ExpHist> ECM::GetHists(long id) {
     std::vector<ExpHist> hists = std::vector<ExpHist>(repetitions_);
     for (int i = 0; i < repetitions_; i++) {
         hists[i] = cm_[i][((hashab_[i][0] * id + hashab_[i][1]) % hashab_[i][2] % width_ + width_) % width_];
@@ -195,7 +215,7 @@ std::vector<ExpHist> ECM::GetHists(long id, int timestamp) {
     return hists;
 }
 
-std::vector<ExpHist> ECM::GetHists(long id, int timestamp, long* hashes) {
+std::vector<ExpHist> ECM::GetHists(long id, long* hashes) {
     std::vector<ExpHist> hists = std::vector<ExpHist>(repetitions_);
     for (int i = 0; i < repetitions_; i++) {
         hists[i] = cm_[i][hashes[i]];
@@ -205,39 +225,8 @@ std::vector<ExpHist> ECM::GetHists(long id, int timestamp, long* hashes) {
 }
 
 
-int ECM::HistSum(const ExpHist &hist, int t) {
-    int z = hist.number;
-	if (z == -1) {
-		return 0;
-	} else {
-		int exp;
-		int count_bucket = 1;
-		int count = 0;
-		int q;
-		for (q = 0; q < z; ++q) {
-            if (hist.bucket[q].start >= t) {
-                exp = hist.bucket[q].exponent;
-                for (int k = 0; k < exp; ++k) {
-                    count_bucket = 2 * count_bucket;
-                }
-                count = count + count_bucket;
-                count_bucket = 1;
-            } else if (hist.bucket[q].start < t && hist.bucket[q].end >= t) {
-                exp = hist.bucket[q].exponent;
-                for (int k = 0; k < exp; ++k) {
-                    count_bucket = 2 * count_bucket;
-                }
-                count = count + count_bucket / 2;
-            }
-		}
-
-		return count;
-	}
-}
-
-
 int ECM::QueryItem(long id, int timestamp) {
-    std::vector<ExpHist> hists = GetHists(id, timestamp);
+    std::vector<ExpHist> hists = GetHists(id);
     int min = INT_MAX;
     for (auto ExpHist : hists) {
         int sum = HistSum(ExpHist, timestamp);
@@ -248,11 +237,108 @@ int ECM::QueryItem(long id, int timestamp) {
 
 
 int ECM::QueryItem(long id, int timestamp, long* hashes) {
-    std::vector<ExpHist> hists = GetHists(id, timestamp, hashes);
+    std::vector<ExpHist> hists = GetHists(id, hashes);
     int min = INT_MAX;
     for (auto ExpHist : hists) {
         int sum = HistSum(ExpHist, timestamp);
         min = std::min(min, sum);
     }
     return min;
+}
+
+
+int HistSum(const ExpHist &hist, int t) {
+    if (hist.buckets.size() == 0) {
+        return 0;
+    }
+
+    int sum = 0;
+    for (int exp = 0; exp < (int) hist.buckets.size(); exp++) {  // loop over exponent lists
+        // if the last bucket falls within the window, we can simply aggregate the entire list
+        if (hist.buckets[exp].back().start >= t) { 
+            sum += std::pow(2, exp) * hist.buckets[exp].size();
+            continue;
+        }
+        // If we already exceeded the time window, we can break
+        if (hist.buckets[exp].front().end < t) {
+            break;
+        }
+
+        // otherwise, loop over buckets in list
+        for (Bucket bucket : hist.buckets[exp]) {
+            if (bucket.start >= t) {
+                sum += std::pow(2, exp);
+            } else if (bucket.start < t && bucket.end >= t) {
+                sum += (std::pow(2, exp) / 2);
+                break;
+            }
+        }
+    }
+    return sum;
+}
+
+void InsertExpHist(ExpHist &hist, int k_, int t) {
+    // Add new item as singleton bucket
+    Bucket new_bucket = Bucket(t, t);
+    // If ExpHist is empty, intialize first exponent list
+    if (hist.buckets.size() == 0) {
+        std::list<Bucket> temp = std::list<Bucket>();
+        temp.push_front(new_bucket);
+        hist.buckets.push_back(temp);
+    } else {
+        // else simply add it to the front of the 1 exponent bucket
+        hist.buckets[0].push_front(new_bucket);
+    }
+    //hist->nr_buckets++;
+
+    // for every exponent list
+    for (size_t k = 0; k < hist.buckets.size(); k++) {
+        // if number of buckets exceeds k, merge the last two buckets
+        if ((int) hist.buckets[k].size() > k_) {
+            Bucket b1 = hist.buckets[k].back(); hist.buckets[k].pop_back();
+            Bucket b2 = hist.buckets[k].back(); hist.buckets[k].pop_back();
+
+            // If this is the last exponent list
+            if ((k+1) == hist.buckets.size()) {
+                hist.buckets.push_back(std::list<Bucket>());
+            }
+            // Create new bucket with exponent k+1
+            hist.buckets[k+1].push_back(Bucket(b2.start, b1.end));
+            //hist->nr_buckets--; // decrease number of buckets due to merge
+        }
+    }
+}
+
+ExpHist MergeECM(std::vector<ExpHist> hists, int k_) {
+    ExpHist merged = ExpHist();
+
+    std::vector<std::pair<int, int>> arrivals;  // arrivals consisting of <time, amount>
+    for (size_t i = 0; i < hists.size(); i++) {
+        for (size_t j = 0; j < hists[i].buckets.size(); j++) {
+            for (Bucket b : hists[i].buckets[j]) {
+                // Assume half of bucket arrived at start and half at end
+                if (j != 0) {
+                    arrivals.push_back(std::make_pair(b.start, std::pow(2, j - 1)));
+                    arrivals.push_back(std::make_pair(b.end, std::pow(2, j - 1)));
+                } else {
+                    // If bucket size is one case
+                    arrivals.push_back(std::make_pair(b.start, 1));
+                }
+            }
+        }
+    }
+
+    // Sort arrivals based on time
+    std::sort(arrivals.begin(), arrivals.end(), [](const std::pair<int, int> &a, const std::pair<int, int> &b) {
+        return a.first < b.first;
+    });
+
+    // Insert arrivals into one exp hist
+    for (std::pair<int, int> arrival : arrivals) {
+        for (int i = 0; i < arrival.second; i++) {
+            InsertExpHist(merged, k_, arrival.first);
+        }
+    }
+
+    return merged;
 }
