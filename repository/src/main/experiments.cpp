@@ -27,16 +27,16 @@ using recursive_directory_iterator = std::filesystem::recursive_directory_iterat
 
 // Parameters in same order they are passed via command line
 int N = 4096;  // grid size
-int query_method = 8;  // 4: postgres, 5: spatial sketch, 6: MARQ, 7: reservoir sampling, 8: 3D CM sketch
+int query_method = 5;  // 4: postgres, 5: spatial sketch, 6: MARQ, 7: reservoir sampling, 8: 3D CM sketch
 int query_sample_size = 1;  // Number of time to perform the same query to increase the sample size and get a better average
 int partition_sample_size = 1;  // number of time rectangle partitioning is performed 
 int query_pos_sample_size = 100; // number of time same shape is put in different positions and queried, queries per file therefore is query_sample_size * query_pos_sample_size
-std::string folder = "/home/jacco/Desktop/grid/";
-std::string region_data_dir = "../experiments/data_in/Regions/Squares/N4096";
-std::string ip_data =  "/home/jacco/Desktop/grid/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
+std::string folder = "/home/jacco/grid/";
+std::string region_data_dir = "/home/jacco/grid/repository/experiments/data_in/RegionData/squares/N4096"; 
+std::string ip_data =  "/home/jacco/grid/repository/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv"; //GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
 int postgres_index = 0;  // 0: no index, 1: btree [x,y], 2: btree [ip,x,y], 3: gist [x,y] box, 4: gist [x,y] polygon, 5: spgist [x,y] box, 6: spgist [x,y] polygon
-std::string sketch_name = "CM";  // CM, dyadicCM, BF, FM, CML2
-long memory_limit = 34797310;
+std::string sketch_name = "ECM";  // CM, dyadicCM, BF, FM, CML2, ECM, ECM_merge
+long memory_limit = 38797312;
 int max_insertions = -1;
 bool range_queries = false;
 
@@ -220,11 +220,13 @@ int main(int argc, char* argv[]) {
             std::getline(*data_file,line); // header
 
             std::cout << "Opened data file: " << ip_data << std::endl;
+            long timestamp = 0;
             while (std::getline(*data_file, line)) {
                 if (max_insertions > -1 && insertion_count >= max_insertions) {
                     std::cout << "Max insertions of " << max_insertions << " reached" << std::endl;
                     break;
                 }
+                timestamp++;
                 std::stringstream linestream(line);
                 input_data tup;
                 for (int i = 0; i < 6; i++) {
@@ -642,6 +644,11 @@ int main(int argc, char* argv[]) {
                 query_sets = pg->GetIPRangeQueriesL2(add_query_ranges, shape_info.vertices, N, 
                                                     shape_info.max_x_offset, shape_info.max_y_offset, 
                                                     query_pos_sample_size, min_query_answer);
+            } else if (sketch_name.find(std::string("ECM")) != std::string::npos) {
+                    query_sets = pg->GetIPRangeQueriesFrequency(add_query_ranges, shape_info.vertices, N, query_resolution,
+                                                    shape_info.max_x_offset, shape_info.max_y_offset,
+                                                    query_pos_sample_size, range_queries,
+                                                    min_query_answer, true);    
             }
 
             if (log_generate_queries) {

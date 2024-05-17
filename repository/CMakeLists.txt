@@ -25,7 +25,8 @@ include_directories(src/spatialsketch/sketches/include)
 add_library(sketches    src/spatialsketch/sketches/CountMin.cpp
                         src/spatialsketch/sketches/BloomFilter.cpp
                         src/spatialsketch/sketches/FM.cpp
-                        src/spatialsketch/sketches/DyadCountMin.cpp)
+                        src/spatialsketch/sketches/DyadCountMin.cpp
+                        src/spatialsketch/sketches/ECM.cpp)
 
 # SpatialSketch
 include_directories(src/spatialsketch/include)

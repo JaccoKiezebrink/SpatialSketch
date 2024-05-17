@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <math.h>
+#include <random>
 
 //#define PRINT_QUERIES
 #define KUBERNETES  // Define used when running on kubernetes cluster which changes bulk insert from file to stdin
@@ -48,14 +49,16 @@ Postgres::Postgres(std::string data_path, int index) {
             pqxx::stream_to S(w, "iplocations");
             std::string line, cell;
             std::getline(*data_file,line); // header
+            long timestamp = 0;
             while (std::getline(*data_file, line)) {
+                timestamp++;
                 std::stringstream linestream(line);
                 std::tuple<long, long, int, int> tup;
                 for (int i = 0; i < 4; i++) {
                     std::getline(linestream, cell, ',');
                     // TODO: This depends on the order of the columns in the dataset, therefore not ideal
                     // Current GeoCaide orders it as follows [timestamp, int_ip, long, lat, points]
-                    if (i == 0) std::get<0>(tup) = (long) std::stol(cell); // timestamp
+                    if (i == 0) std::get<0>(tup) = timestamp; //(long) std::stol(cell); // timestamp
                     if (i == 1) std::get<1>(tup) = (long) std::stol(cell);  // int_ip (can be 2^32, thus uint/long)
                                                                             // We cast it to int as current fucntion support this, that does imply negative items can occur, but this should not change any result.
                     if (i == 2) std::get<2>(tup) = std::stoi(cell);  // long
@@ -503,11 +506,12 @@ long ScaleToResolutionFloor(long value, long current_resolution, long new_resolu
 }
 
 
-std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int resolution, int max_x_offset, int max_y_offset, int sample_size, bool range_queries, int min_query_answer) {
+std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> zerod_ranges, std::vector<std::pair<float, float>> vertices, int N, int resolution, int max_x_offset, int max_y_offset, int sample_size, bool range_queries, int min_query_answer, bool timestamp) {
     std::vector<range> offset_ranges;
     std::vector<std::pair<float, float>> offset_vertices;
     std::vector<QuerySet> query_sets = {};
     query_sets.reserve(sample_size);
+    int time_window = 0;
     pqxx::result neighbour_ips_result;
     try {
         // Todo: Possibly it is not required to open connection each and every time
@@ -521,10 +525,13 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> ze
             // Get top N items, their counts and location
             // By creating materialized view first
             pqxx::work mview(C);
-            mview.exec("CREATE MATERIALIZED VIEW IF NOT EXISTS grouped_ip AS (SELECT ip, longitude, latitude, count(ip) FROM iplocations GROUP BY ip, longitude, latitude ORDER BY ip, longitude, latitude);");
+            mview.exec("CREATE MATERIALIZED VIEW IF NOT EXISTS grouped_ip AS (SELECT ip, longitude, latitude, count(ip), max(timestamp) as timestamp FROM iplocations GROUP BY ip, longitude, latitude ORDER BY ip, longitude, latitude);");
             mview.exec("CREATE INDEX IF NOT EXISTS mview_btree ON grouped_ip USING btree (ip, longitude, latitude);");
             if (range_queries) {
                 mview.exec("CREATE INDEX IF NOT EXISTS mview_btree2 ON grouped_ip USING btree (longitude, latitude);");            
+            }
+            if (timestamp) {
+                mview.exec("CREATE INDEX IF NOT EXISTS btree_time ON iplocations USING btree (timestamp, longitude, latitude);");
             }
             mview.commit();
             // std::string q = "SELECT ip, count(ip) FROM grouped_ip GROUP BY ip HAVING count(ip) > 2;"; // opt 
@@ -706,6 +713,26 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> ze
                 // Ground truth (needed when one ip is mapped to more cells)
                 if (range_queries) {
                     query = "SELECT SUM(count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ") and (ip >= " + std::to_string(start_ip) + " and ip <= " + std::to_string(end_ip) + ");";
+                } else if (timestamp) {
+                    query = "SELECT timestamp FROM grouped_ip where ip = " + std::to_string(item) + " LIMIT 1;";
+                    pqxx::work wtime(C);
+                    pqxx::result timewindow = wtime.exec(query);
+                    wtime.commit();
+                    if (timewindow.size() == 0 || timewindow[0][0].is_null()) {
+                        retries++;
+                        if (retries > 10 * sample_size) {
+                            std::cout << "Quiting GetIPRangeQueriesFrequfency() after " << 10*sample_size << " tries for a good query set, empty timsetamp" << std::endl;
+                            break;
+                        }
+                        continue;
+                    }
+                    // Get random number between max possible timestamp and zero
+                    int qt = timewindow[0][0].as<int>();
+                    std::random_device rd;
+                    std::mt19937 gen(rd());
+                    std::uniform_int_distribution<> distrib(0, qt);
+                    time_window = distrib(gen);
+                    query = "SELECT SUM(count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ") and (ip = " + std::to_string(start_ip) + ") and timestamp >= " + std::to_string(time_window) + ";";
                 } else {
                     query = "SELECT SUM(count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ") and (ip = " + std::to_string(start_ip) + ");";
                 }
@@ -733,14 +760,18 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> ze
                     samples++;
                 }
 
-                query = "SELECT SUM(count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ");";
+                if (timestamp) {
+                    query = "SELECT count(ip) FROM iplocations WHERE (" + ComposeRange(offset_ranges) + ") and (timestamp >= " + std::to_string(time_window) + ");";
+                } else {
+                    query = "SELECT (count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ");";
+                }
                 pqxx::work w2(C);
                 pqxx::result L1_res = w2.exec(query);
                 if (L1_res.size() == 0 || L1_res[0][0].is_null()) { std::cout << "This shouldn't happen" << std::endl; }
                 int L1 = L1_res[0][0].as<int>();;
                 w2.commit();
 
-                QuerySet q = {offset_ranges, offset_vertices, start_ip, end_ip, groundtruth, L1, dataset_size, x_off, y_off};
+                QuerySet q = {offset_ranges, offset_vertices, start_ip, end_ip, groundtruth, L1, dataset_size, x_off, y_off, time_window};
                 query_sets.push_back(q);
             }
             C.disconnect();
@@ -1352,7 +1383,7 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesL2(std::vector<range> zerod_ran
                 int L1 = L1_res[0][0].as<int>();;
                 w2.commit();
 
-                QuerySet q = {offset_ranges, offset_vertices, 0, 0, groundtruth, L1, dataset_size, x_off, y_off};
+                QuerySet q = {offset_ranges, offset_vertices, 0, 0, groundtruth, L1, dataset_size, x_off, y_off, 0};
                 query_sets.push_back(q);
             }
             C.disconnect();
