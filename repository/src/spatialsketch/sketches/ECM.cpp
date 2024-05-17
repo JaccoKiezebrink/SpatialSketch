@@ -33,7 +33,7 @@ ECM::ECM(float epsilon, float delta, long** hashab) : Sketch() {
     width_ = (int) ceil(std::exp(1) / (std::sqrt(epsilon + 1.0f) - 1.0f));
     repetitions_ = (int) ceil(log(1 / delta));
     cm_ = new ExpHist*[repetitions_];
-    size_ = sizeof(int) * width_ * repetitions_; // initially all counters of the cm only consist the number of buckets
+    size_ = sizeof(ExpHist) * width_ * repetitions_; // initially all counters of the cm only consist the number of buckets
     k_ = std::ceil(1.0f/epsilon);
 
     if (hashab != nullptr) {
@@ -100,7 +100,7 @@ void ECM::Insert(long id, int count, long* hashes) {
 
 
 
-void ECM::InsertBucket(int i, int j, int t)	{
+inline void ECM::InsertBucket(const int &i, const int &j, const int &t)	{
     // Add new item as singleton bucket
     Bucket new_bucket = Bucket(t, t);
     ExpHist *hist = &cm_[i][j];
@@ -113,7 +113,7 @@ void ECM::InsertBucket(int i, int j, int t)	{
         // else simply add it to the front of the 1 exponent bucket
         hist->buckets[0].push_front(new_bucket);
     }
-    //hist->nr_buckets++;
+    size_ += sizeof(Bucket);
 
     // for every exponent list
     for (size_t k = 0; k < hist->buckets.size(); k++) {
@@ -121,14 +121,18 @@ void ECM::InsertBucket(int i, int j, int t)	{
         if ((int) hist->buckets[k].size() > k_) {
             Bucket b1 = hist->buckets[k].back(); hist->buckets[k].pop_back();
             Bucket b2 = hist->buckets[k].back(); hist->buckets[k].pop_back();
+            size_ -= 2*sizeof(Bucket);  // remove one bucket
 
             // If this is the last exponent list
             if ((k+1) == hist->buckets.size()) {
                 hist->buckets.push_back(std::list<Bucket>());
+                size_ += sizeof(std::list<Bucket>);
             }
             // Create new bucket with exponent k+1
             hist->buckets[k+1].push_back(Bucket(b2.start, b1.end));
-            //hist->nr_buckets--; // decrease number of buckets due to merge
+            size_ += sizeof(Bucket);
+        } else {
+            break;
         }
     }
 

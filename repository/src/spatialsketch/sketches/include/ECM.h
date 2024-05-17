@@ -93,7 +93,7 @@ class ECM : public Sketch{
     long size_ = 0;
     int k_;
 
-    void InsertBucket(int i, int j, int t);
+    void InsertBucket(const int &i, const int &j, const int &t);
 };
 
 #endif  // ECM_SKETCH_H_

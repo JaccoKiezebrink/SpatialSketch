@@ -31,12 +31,12 @@ int query_method = 5;  // 4: postgres, 5: spatial sketch, 6: MARQ, 7: reservoir 
 int query_sample_size = 1;  // Number of time to perform the same query to increase the sample size and get a better average
 int partition_sample_size = 1;  // number of time rectangle partitioning is performed 
 int query_pos_sample_size = 100; // number of time same shape is put in different positions and queried, queries per file therefore is query_sample_size * query_pos_sample_size
-std::string folder = "/home/jacco/Desktop/grid/";
-std::string region_data_dir = "/home/jacco/Desktop/SpatialSketch/repository/experiments/data_in/RegionData/Squares/N4096"; 
-std::string ip_data =  "/home/jacco/Desktop/SpatialSketch/repository/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv"; //GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
+std::string folder = "/home/jacco/grid/";
+std::string region_data_dir = "/home/jacco/grid/repository/experiments/data_in/RegionData/squares/N4096"; 
+std::string ip_data =  "/home/jacco/grid/repository/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv"; //GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
 int postgres_index = 0;  // 0: no index, 1: btree [x,y], 2: btree [ip,x,y], 3: gist [x,y] box, 4: gist [x,y] polygon, 5: spgist [x,y] box, 6: spgist [x,y] polygon
-std::string sketch_name = "ECM_merge";  // CM, dyadicCM, BF, FM, CML2, ECM, ECM_merge
-long memory_limit = 164797310;
+std::string sketch_name = "ECM";  // CM, dyadicCM, BF, FM, CML2, ECM, ECM_merge
+long memory_limit = 38797312;
 int max_insertions = -1;
 bool range_queries = false;
 
