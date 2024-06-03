@@ -59,3 +59,6 @@ MARQ implementation details:
 Reservoir sampling adapted from: http://hadjieleftheriou.com/sketches/index.html which falls under the GNU Lesser General Public License, therefore, our version of the MARQ implementation is made available under the same license.
 Max heap: https://www.geeksforgeeks.org/binary-heap/ (free to share and adapt as described in https://www.geeksforgeeks.org/legal/copyright-information/)
 MARQ implementation based on https://github.com/r4n4sh/sub_cube_MD_queries, although no license is supplied so the respective countmin and random number generation function you will have to copy over yourself to the MARQ folder and uncomment the respective lines in the CMakeList.txt. Our version of the MARQ implementation is given as well as the adapted range tree implementation from https://github.com/Lucaweihs/range-tree/tree/master (free to use under MIT license).
+
+# ElasticSketch
+The ElasticSketch implementation from https://github.com/BlockLiu/ElasticSketchCode/tree/master/src/CPU/ElasticSketch is used as is with the file content moved to the headers to ensure they compiled with the structure of this repository.
