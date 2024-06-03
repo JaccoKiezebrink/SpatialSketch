@@ -37,24 +37,49 @@ SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, fl
         sketch_ = new ECM(epsilon_, delta_);
         hash_coeffs_long_ = sketch_->GetHashesCoeffLong();
         hashes_long_ = new long[sketch_->repetitions_];
+    } else if (sketch_name_ == "ElasticSketch") {
+        elastic_sketch_ = true; // indication wether to use elastic sketch in grid implementation
+        hashes_32_ = new uint32_t[2];
+        es_sketch_ = new Elastic();
     } else {
         throw "SpatialSketch::SpatialSketch: sketch name not recognized";
     }
-    sketch_size_ = sketch_->GetSize();
-    std::cout << "Sketch size " << sketch_size_ / 1024 << "KB" << std::endl;
-    std::cout << "Sketch repetitions " << sketch_->repetitions_ << std::endl;
+
+    if (elastic_sketch_) {
+        // elastic sketch size does not change <- It can be compressed but not necessary in our experiments.
+         sketch_size_ = TOT_MEM_IN_BYTES;
+    } else {
+        sketch_size_ = sketch_->GetSize();
+        std::cout << "Sketch size " << sketch_size_ / 1024 << "KB" << std::endl;
+        std::cout << "Sketch repetitions " << sketch_->repetitions_ << std::endl;
+    }
 
     // Create list of #levels_ hash maps, where the end of the list contains the highest resolution and the last element contains the single cell grid
-    grids_.reserve(levels_*levels_);
-    for (int x_pow = 0; x_pow < levels_; x_pow++) {
-        for (int y_pow = 0; y_pow < levels_; y_pow++) {
-            int x_dim = std::pow(2,x_pow);
-            int y_dim = std::pow(2,y_pow);
-            grid *g = new grid(x_dim, y_dim);
-            grids_[DimToKey(x_dim, y_dim)] = g;
+    if (elastic_sketch_) {
+        es_grids_.reserve(levels_*levels_);
+        for (int x_pow = 0; x_pow < levels_; x_pow++) {
+            for (int y_pow = 0; y_pow < levels_; y_pow++) {
+                int x_dim = std::pow(2,x_pow);
+                int y_dim = std::pow(2,y_pow);
+                es_grid *g = new es_grid(x_dim, y_dim);
+                es_grids_[DimToKey(x_dim, y_dim)] = g;
 
-            // Grid without initialized sketches is 2d array of null pointers
-            current_memory_ += (x_dim * y_dim * sizeof(void*)); // data list
+                // Grid without initialized sketches is 2d array of null pointers
+                current_memory_ += (x_dim * y_dim * sizeof(void*)); // data list
+            }
+        }
+    } else {
+        grids_.reserve(levels_*levels_);
+        for (int x_pow = 0; x_pow < levels_; x_pow++) {
+            for (int y_pow = 0; y_pow < levels_; y_pow++) {
+                int x_dim = std::pow(2,x_pow);
+                int y_dim = std::pow(2,y_pow);
+                grid *g = new grid(x_dim, y_dim);
+                grids_[DimToKey(x_dim, y_dim)] = g;
+
+                // Grid without initialized sketches is 2d array of null pointers
+                current_memory_ += (x_dim * y_dim * sizeof(void*)); // data list
+            }
         }
     }
 
@@ -65,13 +90,25 @@ SpatialSketch::SpatialSketch(std::string sketch_name, int n, long memory_lim, fl
     }
 
     // Rehash for efficiency and add hash map size
-    grids_.rehash(grids_.size());
-    current_memory_ += grids_.size() * (sizeof(void*)) + // data list
-                            grids_.bucket_count() * (sizeof(void*) + sizeof(size_t)); // bucket index;
+    if (elastic_sketch_) {
+        es_grids_.rehash(es_grids_.size());
+        current_memory_ += es_grids_.size() * (sizeof(void*)) + // data list
+                                es_grids_.bucket_count() * (sizeof(void*) + sizeof(size_t)); // bucket index;        
+    } else {
+        grids_.rehash(grids_.size());
+        current_memory_ += grids_.size() * (sizeof(void*)) + // data list
+                                grids_.bucket_count() * (sizeof(void*) + sizeof(size_t)); // bucket index;
+    }
 }
 
 SpatialSketch::~SpatialSketch() {
-    grids_.clear();
+    if (elastic_sketch_) {
+        es_grids_.clear();
+    } else {
+        grids_.clear();
+    
+    }
+
     //delete cm_;
     if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
         delete hashes_;
@@ -81,6 +118,8 @@ SpatialSketch::~SpatialSketch() {
         delete hashes_;
     } else if (sketch_name_ == "BF") {
         delete hashes_;
+    } else if (sketch_name_ == "ElasticSketch"){
+        delete hashes_32_;
     }
 }
 
@@ -114,7 +153,6 @@ void SpatialSketch::PrintCoverage() {
 
 // Drop grid and update memory
 bool SpatialSketch::DropGrid(int grid_key) {
-    // TODO: CHeck if hash map size also changes
     if (grids_.find(grid_key) == grids_.end()) {
         // std::cout << "Trying to drop grid " << KeyToDimString(grid_key) << " that does not exist" << std::endl;
         return false;
@@ -139,6 +177,35 @@ bool SpatialSketch::DropGrid(int grid_key) {
     current_memory_ -= (dim.first * dim.second * sizeof(void*));  // pointer memory
     current_memory_ -= (sizeof(void*));  // ptr to grid, note that buckets stays until rehash
     grids_.erase(grid_key);
+
+    if (grid_key == DimToKey(n_/resolution_, n_/resolution_)) {
+        resolution_ = resolution_ * 2;
+        levels_ = levels_ - 1;
+        std::cout << "Resolution reduced to " << n_/resolution_ << std::endl;
+        //grids_.rehash(grids_.size());
+    }
+
+    //std::cout << "Dropped grid " << KeyToDimString(grid_key) << ", " << grid_key << "\n";
+    return true;
+}
+
+
+bool SpatialSketch::DropESGrid(int grid_key) {
+    if (es_grids_.find(grid_key) == es_grids_.end()) {
+        // std::cout << "Trying to drop grid " << KeyToDimString(grid_key) << " that does not exist" << std::endl;
+        return false;
+    }
+
+    es_grid* temp_grid = es_grids_[grid_key];
+    std::pair<int, int> dim = KeyToDimInt(grid_key);
+
+    // For fixed size sketches we can simply subtract the memory of the grid
+    // TODO: Verify this is correct for ES
+    current_memory_ -= temp_grid->nr_init_sketches * sketch_size_;  // sketch memory
+
+    current_memory_ -= (dim.first * dim.second * sizeof(void*));  // pointer memory
+    current_memory_ -= (sizeof(void*));  // ptr to grid, note that buckets stays until rehash
+    es_grids_.erase(grid_key);
 
     if (grid_key == DimToKey(n_/resolution_, n_/resolution_)) {
         resolution_ = resolution_ * 2;
@@ -219,7 +286,11 @@ void SpatialSketch::DropNextGrid() {
     // Drop next grid and remove from list
     bool dropped = false;
     while (!dropped) {
-        dropped = DropGrid(dropping_list_.front());
+        if (es_sketch_) {
+            dropped = DropESGrid(dropping_list_.front());
+        } else {
+            dropped = DropGrid(dropping_list_.front());
+        }
         dropping_list_.pop_front();
     }
 }
@@ -230,7 +301,7 @@ inline std::string SpatialSketch::CoordinatesToString(int x1, int y1, int x2, in
     //return std::to_string(x1) + "," + std::to_string(y1) + "," + std::to_string(x2) + "," + std::to_string(y2);
     //return fmt::format("{0},{1},{2},{3}", x1, y1, x2, y2);
 
-    // TODO: Unique key determined by only math operators will be faster
+    // Futur work, Unique key determined by only math operators will be faster
     std::string sd(47, '\0');
     sprintf(const_cast<char*>(sd.c_str()), "%d,%d,%d,%d", x1, y1, x2, y2);
     return sd; //std::string(sprintf("%d,%d,%d,%d", x1, y1, x2, y2));
@@ -248,66 +319,99 @@ void SpatialSketch::MemoryCheck() {
 // --------------- Update functionalities ---------------
 
 // Update dyadic interval
-void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, int value, uint* hashes, long* hashes_long) {
+void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long item, int value, uint* hashes, long* hashes_long, uint32_t* hashes_32) {
     // Check if sketch is initialized and do so if not
 
     int key = DimToKey(n_ / (x2 - x1 + 1), n_ / (y2 - y1 + 1));
-    // Check if grid exists, if not, then it has dropped // TODO: Question is whether this can be done more optimal
-    std::unordered_map<int, grid*>::iterator grid_ptr = grids_.find(key);
-    if (grid_ptr != grids_.end()) {
-        int x_cell = x1/(x2-x1+1);
-        int y_cell = y1/(y2-y1+1);
-        if (grid_ptr->second->cells[x_cell][y_cell] == NULL) {
-            if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
-                grid_ptr->second->cells[x_cell][y_cell] = new CountMin(epsilon_, delta_, hash_coeffs_);
-            } else if (sketch_name_ == "dyadicCM") {
-                grid_ptr->second->cells[x_cell][y_cell] = new DyadCountMin(epsilon_, delta_);
-            } else if (sketch_name_ == "FM") {
-                grid_ptr->second->cells[x_cell][y_cell] = new FM(epsilon_, delta_, hash_coeffs_long_);
-            } else if (sketch_name_ == "BF") {
-                grid_ptr->second->cells[x_cell][y_cell] = new BloomFilter(delta_, domain_size_, hash_coeffs_long_);//, hash_coeffs_long_);  
-            } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
-                grid_ptr->second->cells[x_cell][y_cell] = new ECM(epsilon_, delta_, hash_coeffs_long_);
-            }
 
-            if (nr_hashes_ > 0 ) {
-                if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
-                } else if (sketch_name_ == "FM") {
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
-                } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
+    if (elastic_sketch_) {
+        std::unordered_map<int, es_grid*>::iterator grid_ptr = es_grids_.find(key);
+        if (grid_ptr != es_grids_.end()) {
+            int x_cell = x1/(x2-x1+1);
+            int y_cell = y1/(y2-y1+1);
+            if (grid_ptr->second->cells[x_cell][y_cell] == NULL) {
+                grid_ptr->second->cells[x_cell][y_cell] = new Elastic();
+                //grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value);
+                if (nr_hashes_ > 0 ) {
+                    grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value, hashes_32);
+                } else {
+                    grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value);
+                }
+                // Increment counters
+                grid_ptr->second->nr_init_sketches += 1;
+                current_memory_ += sketch_size_;
+
+                // Initializing of new sketch implies an increase in memory usage
+                if (memory_limit_ > 0) {
+                    MemoryCheck();
                 }
             } else {
-                grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
+                if (nr_hashes_ > 0 ) {
+                    grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value, hashes_32);
+                } else {
+                    grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value);
+                }
+                // grid_ptr->second->cells[x_cell][y_cell]->insert((uint8_t*) &item, value);
             }
-            new_insert_ = grid_ptr->second->cells[x_cell][y_cell]->NewInsert();    
-
-
-            // Increment counters
-            grid_ptr->second->nr_init_sketches += 1;
-            current_memory_ += sketch_size_;
-
-            // Initializing of new sketch implies an increase in memory usage
-            if (memory_limit_ > 0) {
-                MemoryCheck();
-            }
-        } else {
-            //std::cout << DimToKey(n_ / (x2 - x1 + 1), n_ / (y2 - y1 + 1)) << " cell " << x1/(x2-x1+1) << ", " << y1/(y2-y1+1) << " already initialized" << std::endl;
-            if (nr_hashes_ > 0 ) {
+        }
+    } else {
+        // Check if grid exists, if not, then it has dropped 
+        std::unordered_map<int, grid*>::iterator grid_ptr = grids_.find(key);
+        if (grid_ptr != grids_.end()) {
+            int x_cell = x1/(x2-x1+1);
+            int y_cell = y1/(y2-y1+1);
+            if (grid_ptr->second->cells[x_cell][y_cell] == NULL) {
                 if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
+                    grid_ptr->second->cells[x_cell][y_cell] = new CountMin(epsilon_, delta_, hash_coeffs_);
+                } else if (sketch_name_ == "dyadicCM") {
+                    grid_ptr->second->cells[x_cell][y_cell] = new DyadCountMin(epsilon_, delta_);
                 } else if (sketch_name_ == "FM") {
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
+                    grid_ptr->second->cells[x_cell][y_cell] = new FM(epsilon_, delta_, hash_coeffs_long_);
+                } else if (sketch_name_ == "BF") {
+                    grid_ptr->second->cells[x_cell][y_cell] = new BloomFilter(delta_, domain_size_, hash_coeffs_long_);//, hash_coeffs_long_);  
                 } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
-                    current_memory_ -= grid_ptr->second->cells[x_cell][y_cell]->GetSize();
-                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
-                    current_memory_ += grid_ptr->second->cells[x_cell][y_cell]->GetSize();
+                    grid_ptr->second->cells[x_cell][y_cell] = new ECM(epsilon_, delta_, hash_coeffs_long_);
+                }
+
+                if (nr_hashes_ > 0 ) {
+                    if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
+                    } else if (sketch_name_ == "FM") {
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
+                    } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
+                    }
+                } else {
+                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
+                }
+                new_insert_ = grid_ptr->second->cells[x_cell][y_cell]->NewInsert();    
+
+
+                // Increment counters
+                grid_ptr->second->nr_init_sketches += 1;
+                current_memory_ += sketch_size_;
+
+                // Initializing of new sketch implies an increase in memory usage
+                if (memory_limit_ > 0) {
+                    MemoryCheck();
                 }
             } else {
-                grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
+                //std::cout << DimToKey(n_ / (x2 - x1 + 1), n_ / (y2 - y1 + 1)) << " cell " << x1/(x2-x1+1) << ", " << y1/(y2-y1+1) << " already initialized" << std::endl;
+                if (nr_hashes_ > 0 ) {
+                    if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_);
+                    } else if (sketch_name_ == "FM") {
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, hashes_long_);
+                    } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
+                        current_memory_ -= grid_ptr->second->cells[x_cell][y_cell]->GetSize();
+                        grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value, hashes_long_);
+                        current_memory_ += grid_ptr->second->cells[x_cell][y_cell]->GetSize();
+                    }
+                } else {
+                    grid_ptr->second->cells[x_cell][y_cell]->Insert(item, value);
+                }
+                new_insert_ = grid_ptr->second->cells[x_cell][y_cell]->NewInsert();            
             }
-            new_insert_ = grid_ptr->second->cells[x_cell][y_cell]->NewInsert();            
         }
     }
 }
@@ -318,7 +422,7 @@ inline void SpatialSketch::UpdateInterval(int x1, int y1, int x2, int y2, long i
         throw "SpatialSketch::UpdateInterval: sketch is not dyadicCM";
     }
     int key = DimToKey(n_ / (x2 - x1 + 1), n_ / (y2 - y1 + 1));
-    // Check if grid exists, if not, then it has dropped // TODO: Question is whether this can be done more optimal
+    // Check if grid exists, if not, then it has dropped
     std::unordered_map<int, grid*>::iterator grid_ptr = grids_.find(key);
     if (grid_ptr != grids_.end()) {
         int x_cell = x1/(x2-x1+1);
@@ -439,6 +543,8 @@ void SpatialSketch::Update(int x, int y, long item, int value) {
         nr_hashes_ = 0; //sketch_->repetitions_;//GetItemHashes(item, hashes_);
     } else if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
         nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
+    } else if (sketch_name_ == "ElasticSketch") {
+        nr_hashes_ = es_sketch_->GetItemHashes((uint8_t*) &item, hashes_32_);
     }
 
     std::vector<std::pair<int, int>> x_intervals, y_intervals;
@@ -468,8 +574,8 @@ void SpatialSketch::Update(int x, int y, long item, int value) {
                 continue;
             }
             // Update the individual intervals
-            if (sketch_name_ == "CM" || sketch_name_ == "CML2" || sketch_name_ == "FM" || (sketch_name_.find(std::string("ECM")) != std::string::npos)) {
-                UpdateInterval(x_intervals[i].first - 1, y_intervals[j].first - 1, x_intervals[i].second - 1, y_intervals[j].second - 1, item, value, hashes_, hashes_long_);
+            if (sketch_name_ == "CM" || sketch_name_ == "CML2" || sketch_name_ == "FM" || (sketch_name_.find(std::string("ECM")) != std::string::npos || sketch_name_ == "ElasticSketch")) {
+                UpdateInterval(x_intervals[i].first - 1, y_intervals[j].first - 1, x_intervals[i].second - 1, y_intervals[j].second - 1, item, value, hashes_, hashes_long_, hashes_32_);
             } else if (sketch_name_ == "dyadicCM") {
                 UpdateInterval(x_intervals[i].first - 1, y_intervals[j].first - 1, x_intervals[i].second - 1, y_intervals[j].second - 1, item, value, precompute_);
             } else if (sketch_name_ == "BF") {
@@ -494,7 +600,6 @@ void SpatialSketch::Update(int x, int y, long item, int value) {
 
 
 // --------- Query functionalities -----------
-// TODO: only recurse as deep as lowest level
 
 // Concatenate vector b to vector a
 void SpatialSketch::ConcatVectors(std::vector<dyadic1D> &a, std::vector<dyadic1D> &b) {
@@ -649,30 +754,46 @@ std::vector<dyadic2D> SpatialSketch::GetDyadicIntervals(int x1, int y1, int x2, 
 
 bool SpatialSketch::QueryDyadicInterval(dyadic2D di, long item, long item_end, int &query_sum, int timestamp) {
     /*std::string*/ int key = DimToKey(n_ / (di.x2 - di.x1 + 1), n_ / (di.y2 - di.y1 + 1));
-    auto grid_ptr = grids_.find(key);
-    if (grid_ptr != grids_.end()) {
-        
-        int x_cell = di.x1/(di.x2-di.x1+1);
-        int y_cell = di.y1/(di.y2-di.y1+1);
-        // Check if the actual sketch is initialized, if it isn't then the value is simply zero
-        if (grid_ptr->second->cells[x_cell][y_cell] != NULL) {
-            if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
-                if (nr_hashes_ > 0) {
-                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, hashes_));
-                } else {
-                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item));
-                }
-            } else if (sketch_name_ == "dyadicCM") {
-                query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->Query(dyadic1D(item, item_end))); 
-            } else if (sketch_name_ == "ECM") {
-                if (nr_hashes_ > 0) {
-                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp, hashes_long_));
-                } else {
-                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp));
-                }
+
+    if (elastic_sketch_) {       
+        auto grid_ptr = es_grids_.find(key);
+        if (grid_ptr != es_grids_.end()) {
+            
+            int x_cell = di.x1/(di.x2-di.x1+1);
+            int y_cell = di.y1/(di.y2-di.y1+1);
+            // Check if the actual sketch is initialized, if it isn't then the value is simply zero
+            if (grid_ptr->second->cells[x_cell][y_cell] != NULL) {
+                query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->query((uint8_t*) &item));
             }
-        } 
-        return true;  // Grid exists, thus query was success
+ 
+            return true;  // Grid exists, thus query was success
+        }
+    } else {
+        auto grid_ptr = grids_.find(key);
+        if (grid_ptr != grids_.end()) {
+            
+            int x_cell = di.x1/(di.x2-di.x1+1);
+            int y_cell = di.y1/(di.y2-di.y1+1);
+            // Check if the actual sketch is initialized, if it isn't then the value is simply zero
+            if (grid_ptr->second->cells[x_cell][y_cell] != NULL) {
+                if (sketch_name_ == "CM" || sketch_name_ == "CML2") {
+                    if (nr_hashes_ > 0) {
+                        query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, hashes_));
+                    } else {
+                        query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item));
+                    }
+                } else if (sketch_name_ == "dyadicCM") {
+                    query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->Query(dyadic1D(item, item_end))); 
+                } else if (sketch_name_ == "ECM") {
+                    if (nr_hashes_ > 0) {
+                        query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp, hashes_long_));
+                    } else {
+                        query_sum += (int) (di.coverage * grid_ptr->second->cells[x_cell][y_cell]->QueryItem(item, timestamp));
+                    }
+                }
+            } 
+            return true;  // Grid exists, thus query was success
+        }
     }
     return false;  // Grid doesn't exist
 }
@@ -741,6 +862,8 @@ int SpatialSketch::QueryFrequency(std::vector<range> ranges, long item, long ite
 
     if (sketch_name_.find(std::string("ECM")) != std::string::npos) {
         nr_hashes_ = sketch_->GetItemHashes(item, hashes_long_);
+    } else if (sketch_name_ == "ElasticSketch") {
+        nr_hashes_ = 0;
     } else {
         nr_hashes_ = sketch_->GetItemHashes(item, hashes_);
     }

@@ -31,11 +31,14 @@ int query_method = 5;  // 4: postgres, 5: spatial sketch, 6: MARQ, 7: reservoir 
 int query_sample_size = 1;  // Number of time to perform the same query to increase the sample size and get a better average
 int partition_sample_size = 1;  // number of time rectangle partitioning is performed 
 int query_pos_sample_size = 100; // number of time same shape is put in different positions and queried, queries per file therefore is query_sample_size * query_pos_sample_size
-std::string folder = "/home/jacco/grid/";
-std::string region_data_dir = "/home/jacco/grid/repository/experiments/data_in/RegionData/squares/N4096"; 
-std::string ip_data =  "/home/jacco/grid/repository/experiments/data_in/GeoCaida/GeoCaidaN4096L1M.csv"; //GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
+std::string jacco_folder = "/home/jacco/grid/";
+std::string wieger_folder = "/home/wieger/Documents/Research/SpatialSketch/edbt_code/grid/";
+std::string cluster_folder = "/home/grid-run/";
+std::string folder = cluster_folder;
+std::string region_data_dir = folder + "repository/experiments/data_in/RegionData/squares/N4096"; 
+std::string ip_data =  folder + "repository/experiments/data_in/GeoCaida/GeoCaidaN4096L10M.csv"; //GeoCaidaN4096L1M.csv";  // if empty (""), fixed data is inserted for naive, fenwick, dyadic (not postgres)
 int postgres_index = 0;  // 0: no index, 1: btree [x,y], 2: btree [ip,x,y], 3: gist [x,y] box, 4: gist [x,y] polygon, 5: spgist [x,y] box, 6: spgist [x,y] polygon
-std::string sketch_name = "ECM";  // CM, dyadicCM, BF, FM, CML2, ECM, ECM_merge
+std::string sketch_name = "ElasticSketch";  // CM, dyadicCM, BF, FM, CML2, ECM, ECM_merge, ElasticSketch
 long memory_limit = 38797312;
 int max_insertions = -1;
 bool range_queries = false;
@@ -54,7 +57,7 @@ int marq_insertion_method = 0;  // 0: stream, 1: bulk
 bool subtractive_querying = false;  // most subtractive querying removed from experiments
 
 // Other variables
-std::string experiments_dir = "../experiments/data_out/";  // where to log statistics
+std::string experiments_dir = folder + "repository/experiments/data_out/";  // where to log statistics
 
 // Partition failure handling
 int fail_count = 0;
@@ -66,7 +69,7 @@ bool force_min_query_answer = true;
 int min_query_answer = -1;  // todo set
 
 // Query generation
-bool queries_from_file = false; // cached queries
+bool queries_from_file = true; // cached queries
 bool log_generate_queries = false; // write queries to file
 bool insert_from_file = false; // benchmarking ingestion time: set to true. Otherwise, set to false and insert from memory
 bool align_queries = false; // align queries to data structure resolution
@@ -563,7 +566,11 @@ int main(int argc, char* argv[]) {
             // Try to read corresponding query file
             std::string query_folder;
             query_folder = "/queries/";
+            
             std::string qfile_name = entry.path().parent_path().parent_path().string() + query_folder + entry.path().filename().string() + "_queries_sketch=" +sketch_name ;
+            if (sketch_name == "ElasticSketch") {
+                qfile_name = entry.path().parent_path().parent_path().string() + query_folder + entry.path().filename().string() + "_queries_sketch=" + "CM";
+            }
             std::ifstream qfile(qfile_name, std::ios::out);
             if (qfile.is_open()) {
                 std::cout << "Using supplied query file: " << qfile_name << std::endl;
@@ -626,7 +633,7 @@ int main(int argc, char* argv[]) {
         } else {
 
             // Get query set and ground truth via postgres                
-            if (sketch_name == "CM" || sketch_name == "dyadicCM") {
+            if (sketch_name == "CM" || sketch_name == "dyadicCM" || sketch_name == "ElasticSketch") {
                 query_sets = pg->GetIPRangeQueriesFrequency(add_query_ranges, shape_info.vertices, N, query_resolution,
                                                     shape_info.max_x_offset, shape_info.max_y_offset,
                                                     query_pos_sample_size, range_queries,

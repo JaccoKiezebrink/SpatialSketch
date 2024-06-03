@@ -653,10 +653,10 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> ze
                 if (item_within_region == false) {
                     //std::cout << "Item not in region" << std::endl;
                     retries++;
-                    if (retries > 5 * sample_size) {
-                        std::cout << "Quiting GetIPRangeQueries2() after " << 5*sample_size << " tries for a good query set, not in range" << std::endl;
+                    if (retries > 10 * sample_size) {
+                        std::cout << "Quiting GetIPRangeQueries2() after " << 510*sample_size << " tries for a good query set, not in range" << std::endl;
                     }
-                    continue;
+                    break;
                 }
 
                 long start_ip = 0;
@@ -761,9 +761,9 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesFrequency(std::vector<range> ze
                 }
 
                 if (timestamp) {
-                    query = "SELECT count(ip) FROM iplocations WHERE (" + ComposeRange(offset_ranges) + ") and (timestamp >= " + std::to_string(time_window) + ");";
+                    query = "SELECT SUM count(ip) FROM iplocations WHERE (" + ComposeRange(offset_ranges) + ") and (timestamp >= " + std::to_string(time_window) + ");";
                 } else {
-                    query = "SELECT (count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ");";
+                    query = "SELECT SUM (count) FROM grouped_ip WHERE (" + ComposeRange(offset_ranges) + ");";
                 }
                 pqxx::work w2(C);
                 pqxx::result L1_res = w2.exec(query);
@@ -915,10 +915,10 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesCountDistinct(std::vector<range
                 if (item_within_region == false) {
                     //std::cout << "Item not in region" << std::endl;
                     retries++;
-                    if (retries > 5 * sample_size) {
-                        std::cout << "Quiting GetIPRangeQueriesCountDistinct() after " << 5*sample_size << " tries for a good query set, not in range" << std::endl;
+                    if (retries > 10 * sample_size) {
+                        std::cout << "Quiting GetIPRangeQueriesCountDistinct() after " << 10*sample_size << " tries for a good query set, not in range" << std::endl;
                     }
-                    continue;
+                    break;
                 }
 
                 // Given new query range with item within range, compute the entire query set data
@@ -1135,10 +1135,10 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesMembership(std::vector<range> z
                 if (item_within_region == false) {
                     //std::cout << "Item not in region" << std::endl;
                     retries++;
-                    if (retries > 5 * sample_size) {
-                        std::cout << "Quiting GetIPRangeQueriesCountDistinct() after " << 5*sample_size << " tries for a good query set, not in range" << std::endl;
+                    if (retries > 10 * sample_size) {
+                        std::cout << "Quiting GetIPRangeQueriesCountDistinct() after " << 10*sample_size << " tries for a good query set, not in range" << std::endl;
                     }
-                    continue;
+                    break;
                 }
 
                 // Given new query range with item within range, compute the entire query set data
@@ -1335,10 +1335,10 @@ std::vector<QuerySet> Postgres::GetIPRangeQueriesL2(std::vector<range> zerod_ran
                 if (item_within_region == false) {
                     //std::cout << "Item not in region" << std::endl;
                     retries++;
-                    if (retries > 5 * sample_size) {
-                        std::cout << "Quiting GetIPRangeQueries2() after " << 5*sample_size << " tries for a good query set, not in range" << std::endl;
+                    if (retries > 10 * sample_size) {
+                        std::cout << "Quiting GetIPRangeQueries2() after " << 10*sample_size << " tries for a good query set, not in range" << std::endl;
                     }
-                    continue;
+                    break;
                 }
 
                 // Given new query range with item within range, compute the entire query set data

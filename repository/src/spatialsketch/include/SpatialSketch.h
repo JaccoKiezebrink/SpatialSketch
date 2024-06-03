@@ -11,10 +11,45 @@
 #include "FM.h"
 #include "BloomFilter.h"
 #include "ECM.h"
+#include "ElasticSketch.h"
 
 #include <vector>
 #include <list>
 #include <unordered_map>
+
+
+// ElasticSketch parameters
+// Same budget as one CM sketch with epsilon=0.1 and delta=0.05.
+#define HEAVY_MEM (168)
+#define BUCKET_NUM (HEAVY_MEM / 64)
+//#define BUCKET_NUM (1)
+#define TOT_MEM_IN_BYTES (336)
+typedef ElasticSketch<BUCKET_NUM,TOT_MEM_IN_BYTES> Elastic;
+
+typedef struct es_grid {
+    Elastic*** cells = 0;
+    int x_dim = 0;
+    int nr_init_sketches = 0;
+
+    es_grid(int x_dim, int y_dim) : x_dim(x_dim) {
+        cells = new Elastic**[x_dim];
+        for (int i = 0; i < x_dim; i++) {
+            cells[i] = new Elastic*[y_dim];
+            // Enforce null pointers
+            for (int j = 0; j < y_dim; j++) {
+                cells[i][j] = NULL;
+            }
+        }
+    }
+
+    ~es_grid() {
+        for (int i = 0; i < x_dim; i++) {
+            delete[] cells[i];
+        }
+        delete[] cells;
+    }
+} es_grid;
+
 
 
 typedef struct grid {
@@ -40,6 +75,7 @@ typedef struct grid {
         delete[] cells;
     }
 } grid;
+
 
 
 class SpatialSketch {
@@ -91,6 +127,11 @@ class SpatialSketch {
         std::list<dyadic1D> top_level_intervals_;  // The set of largest non-overlapping intervals, for n that are power of 2, this is simply [1, n], for n=11, this is [1,8], [9,10], [11,11]
         int* nr_of_interval_cum_sum_ = nullptr;
 
+        // Elastic sketch
+        std::unordered_map<int, es_grid*> es_grids_;
+        Elastic* es_sketch_ = nullptr;
+        bool elastic_sketch_ = false;
+
         // Sketch related
         //int sketch_type_ = 0;
         std::string sketch_name_;// = "BF";//= "CM";
@@ -98,6 +139,7 @@ class SpatialSketch {
         int nr_hashes_ = 0;
         uint *hashes_ = nullptr;
         long *hashes_long_ = nullptr;
+        uint32_t *hashes_32_ = nullptr;
         int **hash_coeffs_ = nullptr;
         long **hash_coeffs_long_ = nullptr;
         int domain_size_;
@@ -129,9 +171,11 @@ class SpatialSketch {
 
         // --- Dropping functionality ---
         bool DropGrid(int grid_key);
+        bool DropESGrid(int grid_key); // ElasticSketch variants
         std::list<int> GenDiagonalGridKeys(int exponent_sum, int max_exponent);
         std::list<int> GenHighestResolutionGridKeys();
         void DropNextGrid();
+        
 
         // --- Generic function  ---
         // Convert any grid dimension to string to be used as the key in hash maps 
@@ -171,7 +215,8 @@ class SpatialSketch {
         // --- Update functionality ---
         // Update the dyadic interval of specified dimensions with given item id and value
         // Optional passing of the level the dyadic interval is at to speed up computation
-        void UpdateInterval(int x1, int y1, int x2, int y2, long item=0, int value=1, uint* hashes=NULL, long* hashes_long=nullptr);
+        void UpdateInterval(int x1, int y1, int x2, int y2, long item=0, int value=1, uint* hashes=NULL, long* hashes_long=nullptr,
+        uint32_t* hashes_32=nullptr);
         void UpdateInterval(int x1, int y1, int x2, int y2, long item, int value, dyadic_cm_precompute* precompute);
         
         // Given a target index and top-level interval, find the set of dyadic intervals that contain the target
